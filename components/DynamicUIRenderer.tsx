@@ -2,12 +2,15 @@
 
 import * as React from 'react';
 import { useState, useEffect, useMemo, useRef, useContext } from 'react';
+import * as Babel from '@babel/standalone';
 import { LiveContext, LiveProvider, LivePreview } from 'react-live';
 
 interface DynamicUIRendererProps {
   code: string;
   isStreaming?: boolean;
 }
+
+type TransformResult = { code: string; error: string | null };
 
 function PreviewError({ onChange }: { onChange: (message: string | null) => void }) {
   const live = useContext(LiveContext);
@@ -53,9 +56,10 @@ const isRenderable = (source: string) => {
 export default function DynamicUIRenderer({ code, isStreaming = false }: DynamicUIRendererProps) {
   const [showCode, setShowCode] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [renderError, setRenderError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const [previewCode, setPreviewCode] = useState('');
   const stableCodeRef = useRef('');
+  const runtimeCodeRef = useRef('');
 
   const extractedCode = useMemo(() => {
     const codeBlockRegex = /```(?:tsx|jsx|typescript|javascript)?\n([\s\S]*?)```/g;
@@ -132,8 +136,42 @@ export default function DynamicUIRenderer({ code, isStreaming = false }: Dynamic
   }, [processedCode, canRender]);
 
   useEffect(() => {
-    setRenderError(null);
+    setLiveError(null);
   }, [previewCode]);
+
+  const transformResult: TransformResult = useMemo(() => {
+    if (!previewCode) {
+      return { code: '', error: null };
+    }
+
+    try {
+      const result = Babel.transform(previewCode, {
+        presets: ['env', 'react'],
+        plugins: ['transform-typescript', 'proposal-class-properties', 'proposal-object-rest-spread'],
+        filename: 'GeneratedComponent.tsx',
+      });
+
+      return {
+        code: result.code ?? '',
+        error: null,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '代码转换失败';
+      return {
+        code: '',
+        error: message,
+      };
+    }
+  }, [previewCode]);
+
+  useEffect(() => {
+    if (!transformResult.error && transformResult.code) {
+      runtimeCodeRef.current = transformResult.code;
+    }
+  }, [transformResult]);
+
+  const runtimeCodeToRender = transformResult.code || runtimeCodeRef.current;
+  const activeError = transformResult.error ?? liveError;
 
   const handleCopy = async () => {
     try {
@@ -159,7 +197,7 @@ export default function DynamicUIRenderer({ code, isStreaming = false }: Dynamic
           <div className="flex items-center gap-2">
             <span
               className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${
-                renderError
+                activeError
                   ? 'bg-red-50 text-red-500'
                   : isStreaming
                   ? 'bg-blue-50 text-blue-500'
@@ -168,9 +206,9 @@ export default function DynamicUIRenderer({ code, isStreaming = false }: Dynamic
             >
               <span
                 className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: renderError ? '#ef4444' : isStreaming ? '#3b82f6' : '#10b981' }}
+                style={{ backgroundColor: activeError ? '#ef4444' : isStreaming ? '#3b82f6' : '#10b981' }}
               ></span>
-              {renderError ? '渲染失败' : isStreaming ? '实时生成中' : '已完成'}
+              {activeError ? '渲染失败' : isStreaming ? '实时生成中' : '已完成'}
             </span>
             <div className="flex items-center gap-1 rounded-full border border-neutral-200 bg-white/80 p-1">
               <button
@@ -214,9 +252,16 @@ export default function DynamicUIRenderer({ code, isStreaming = false }: Dynamic
             </div>
           )}
 
-          {!waitingForFirstRender && previewCode && (
+          {transformResult.error && (
+            <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-600">
+              <p className="mb-2 font-medium">代码转换失败</p>
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{transformResult.error}</pre>
+            </div>
+          )}
+
+          {!waitingForFirstRender && runtimeCodeToRender && (
             <LiveProvider
-              code={previewCode}
+              code={runtimeCodeToRender}
               noInline={true}
               scope={{
                 useState,
@@ -229,7 +274,7 @@ export default function DynamicUIRenderer({ code, isStreaming = false }: Dynamic
               <div className="rounded-2xl border border-neutral-200 bg-white px-4 py-5 shadow-inner">
                 <LivePreview />
               </div>
-              <PreviewError onChange={setRenderError} />
+              <PreviewError onChange={setLiveError} />
             </LiveProvider>
           )}
 
@@ -254,7 +299,7 @@ export default function DynamicUIRenderer({ code, isStreaming = false }: Dynamic
 
       <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
         <span className="rounded-full bg-white px-3 py-1 shadow-sm">行数：{extractedCode.split('\n').length}</span>
-        {renderError ? (
+        {activeError ? (
           <span className="rounded-full bg-red-50 px-3 py-1 text-red-500">请检查代码语法或缺失的依赖</span>
         ) : (
           <span className="rounded-full bg-white px-3 py-1 shadow-sm">支持 React · Tailwind CSS</span>
