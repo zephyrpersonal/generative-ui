@@ -1,100 +1,190 @@
 'use client';
 
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { LiveProvider, LivePreview, LiveError } from 'react-live';
+import * as React from 'react';
+import { useState, useEffect, useMemo, useRef, useContext } from 'react';
+import * as Babel from '@babel/standalone';
+import { LiveContext, LiveProvider, LivePreview } from 'react-live';
 
 interface DynamicUIRendererProps {
   code: string;
+  isStreaming?: boolean;
 }
 
-export default function DynamicUIRenderer({ code }: DynamicUIRendererProps) {
+type TransformResult = { code: string; error: string | null };
+
+function PreviewError({ onChange }: { onChange: (message: string | null) => void }) {
+  const live = useContext(LiveContext);
+  const errorMessage = typeof live?.error === 'string' ? live.error : null;
+
+  useEffect(() => {
+    onChange(errorMessage);
+  }, [errorMessage, onChange]);
+
+  if (!errorMessage) {
+    return null;
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-600">
+      <p className="mb-2 font-medium">渲染出错</p>
+      <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{errorMessage}</pre>
+    </div>
+  );
+}
+
+const isRenderable = (source: string) => {
+  const cleaned = source.trim();
+  if (!cleaned) return false;
+
+  let depth = 0;
+  for (const char of cleaned) {
+    if (char === '{') depth += 1;
+    if (char === '}') depth -= 1;
+    if (depth < 0) return false;
+  }
+
+  if (depth !== 0) return false;
+
+  return (
+    /return\s+\(/.test(cleaned) ||
+    /=>\s*\(/.test(cleaned) ||
+    cleaned.startsWith('<') ||
+    cleaned.includes('render(')
+  );
+};
+
+export default function DynamicUIRenderer({ code, isStreaming = false }: DynamicUIRendererProps) {
   const [showCode, setShowCode] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [renderError, setRenderError] = useState<string | null>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
+  const [previewCode, setPreviewCode] = useState('');
+  const stableCodeRef = useRef('');
+  const runtimeCodeRef = useRef('');
 
-  // 提取代码块
   const extractedCode = useMemo(() => {
     const codeBlockRegex = /```(?:tsx|jsx|typescript|javascript)?\n([\s\S]*?)```/g;
     const matches = [...code.matchAll(codeBlockRegex)];
     if (matches.length > 0) {
       return matches[0][1].trim();
     }
-    return code;
+    return code.trim();
   }, [code]);
 
-  // 处理代码，移除 export default 和 import 语句，提取组件函数
   const processedCode = useMemo(() => {
     if (!extractedCode) return '';
 
     let processed = extractedCode;
 
-    // 移除所有 import 语句（支持多行）
     processed = processed.replace(/import\s+[\s\S]*?from\s+['"].*?['"]\s*;?\s*/g, '');
     processed = processed.replace(/import\s+['"].*?['"]\s*;?\s*/g, '');
-
-    // 移除 'use client' 指令
     processed = processed.replace(/['"]use client['"];?\s*/g, '');
-
-    // 移除 export default
     processed = processed.replace(/export\s+default\s+/g, '');
-
-    // 移除 export
     processed = processed.replace(/export\s+/g, '');
 
-    // 清理首尾空白
     processed = processed.trim();
 
-    // 如果代码已经是 JSX 表达式（以 < 开头），直接返回
     if (processed.startsWith('<')) {
       return processed;
     }
 
-    // 检测组件名称 - 改进的正则表达式
-    let componentName = null;
+    let componentName: string | null = null;
 
-    // 尝试匹配 function 声明: function ComponentName() { ... }
-    let functionMatch = processed.match(/function\s+([A-Z]\w+)\s*\(/);
+    const functionMatch = processed.match(/function\s+([A-Z]\w*)\s*\(/);
     if (functionMatch) {
       componentName = functionMatch[1];
     }
 
-    // 尝试匹配 const 声明: const ComponentName = () => { ... } 或 const ComponentName = function
     if (!componentName) {
-      const constMatch = processed.match(/const\s+([A-Z]\w+)\s*=\s*(?:\([^)]*\)\s*=>|function)/);
+      const constMatch = processed.match(
+        /const\s+([A-Z]\w*)\s*(?::[^=\n]+)?=\s*(?:\([^)]*\)\s*=>|function\b)/,
+      );
       if (constMatch) {
         componentName = constMatch[1];
       }
     }
 
-    // 如果找到组件名，使用 render() 函数（noInline={true} 模式）
     if (componentName) {
-      // 检查是否已经有 render() 调用
       if (!processed.includes('render(')) {
-        // 在代码最后添加 render() 调用
         processed = `${processed}\n\nrender(<${componentName} />);`;
       }
-    } else {
-      // 如果没有检测到组件名，可能是直接的 JSX
-      // 检查是否包含 JSX 标签
-      if (processed.includes('<') && processed.includes('>')) {
-        // 直接用 render() 包装 JSX
-        if (!processed.includes('render(')) {
-          processed = `render(${processed});`;
-        }
+    } else if (processed.includes('<') && processed.includes('>')) {
+      if (!processed.includes('render(')) {
+        processed = `render(${processed});`;
       }
     }
 
     return processed;
   }, [extractedCode]);
 
-  // 检查是否是完整的代码块
-  const hasCompleteCode = useMemo(() => {
-    return extractedCode.length > 50 && (
-      extractedCode.includes('return') ||
-      extractedCode.includes('=>') ||
-      extractedCode.includes('function')
-    );
-  }, [extractedCode]);
+  const canRender = useMemo(() => isRenderable(extractedCode), [extractedCode]);
+  const hasStablePreview = Boolean(stableCodeRef.current);
+  const waitingForFirstRender = isStreaming && !hasStablePreview;
+
+  useEffect(() => {
+    if (!processedCode) {
+      stableCodeRef.current = '';
+      setPreviewCode('');
+      return;
+    }
+
+    if (canRender) {
+      stableCodeRef.current = processedCode;
+      setPreviewCode(processedCode);
+    } else if (stableCodeRef.current) {
+      setPreviewCode(stableCodeRef.current);
+    } else {
+      setPreviewCode('');
+    }
+  }, [processedCode, canRender]);
+
+  useEffect(() => {
+    setLiveError(null);
+  }, [previewCode]);
+
+  const transformResult: TransformResult = useMemo(() => {
+    if (!previewCode) {
+      return { code: '', error: null };
+    }
+
+    try {
+      const result = Babel.transform(previewCode, {
+        presets: ['env', 'react'],
+        plugins: [
+          [
+            'transform-typescript',
+            {
+              isTSX: true,
+              allowDeclareFields: true,
+              allowNamespaces: true,
+            },
+          ],
+          'proposal-class-properties',
+          'proposal-object-rest-spread',
+        ],
+        filename: 'GeneratedComponent.tsx',
+      });
+
+      return {
+        code: result.code ?? '',
+        error: null,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '代码转换失败';
+      return {
+        code: '',
+        error: message,
+      };
+    }
+  }, [previewCode]);
+
+  useEffect(() => {
+    if (!transformResult.error && transformResult.code) {
+      runtimeCodeRef.current = transformResult.code;
+    }
+  }, [transformResult]);
+
+  const runtimeCodeToRender = transformResult.code || runtimeCodeRef.current;
+  const activeError = transformResult.error ?? liveError;
 
   const handleCopy = async () => {
     try {
@@ -106,226 +196,131 @@ export default function DynamicUIRenderer({ code }: DynamicUIRendererProps) {
     }
   };
 
-  // 如果代码还在流式传输中且不完整，显示加载状态
-  if (!hasCompleteCode) {
-    return (
-      <div className="card bg-base-100 shadow-xl">
-        <div className="card-body">
-          <div className="flex items-center gap-3">
-            <span className="loading loading-spinner loading-md text-primary"></span>
-            <div>
-              <h3 className="font-semibold">正在生成组件...</h3>
-              <p className="text-sm text-base-content/60">AI 正在为您创建精美的 UI</p>
+  return (
+    <div className="w-full space-y-4">
+      <div className="relative overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-sm">
+        {isStreaming && (
+          <div className="absolute inset-x-0 top-0 h-[2px] animate-pulse bg-gradient-to-r from-neutral-200 via-neutral-400 to-neutral-200" />
+        )}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-3">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-neutral-400">Live Preview</p>
+            <p className="mt-1 text-sm font-medium text-neutral-800">生成的界面组件</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span
+              className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium ${
+                activeError
+                  ? 'bg-red-50 text-red-500'
+                  : isStreaming
+                  ? 'bg-blue-50 text-blue-500'
+                  : 'bg-emerald-50 text-emerald-600'
+              }`}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: activeError ? '#ef4444' : isStreaming ? '#3b82f6' : '#10b981' }}
+              ></span>
+              {activeError ? '渲染失败' : isStreaming ? '实时生成中' : '已完成'}
+            </span>
+            <div className="flex items-center gap-1 rounded-full border border-neutral-200 bg-white/80 p-1">
+              <button
+                type="button"
+                onClick={() => setShowCode((prev) => !prev)}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  showCode ? 'bg-neutral-900 text-white' : 'text-neutral-500 hover:text-neutral-900'
+                }`}
+              >
+                {showCode ? '隐藏代码' : '查看代码'}
+              </button>
+              <button
+                type="button"
+                onClick={handleCopy}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  copied ? 'bg-emerald-500 text-white' : 'text-neutral-500 hover:text-neutral-900'
+                }`}
+              >
+                {copied ? '已复制' : '复制代码'}
+              </button>
             </div>
           </div>
-          {extractedCode && (
-            <div className="mt-4 p-3 bg-base-200 rounded-lg">
-              <pre className="text-xs opacity-70 overflow-x-auto">
-                <code>{extractedCode.substring(0, 200)}...</code>
-              </pre>
+        </div>
+
+        <div className="px-6 pb-6 pt-5">
+          {waitingForFirstRender && (
+            <div className="space-y-4">
+              <div className="space-y-3">
+                <div className="h-10 w-2/3 animate-pulse rounded-2xl bg-neutral-100" />
+                <div className="h-28 w-full animate-pulse rounded-2xl bg-neutral-100" />
+                <div className="h-8 w-1/2 animate-pulse rounded-2xl bg-neutral-100" />
+              </div>
+              {extractedCode && (
+                <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 p-4">
+                  <p className="text-xs font-medium text-neutral-500">正在生成代码片段…</p>
+                  <pre className="mt-2 max-h-48 overflow-hidden whitespace-pre-wrap break-words text-[11px] text-neutral-400">
+                    {`${extractedCode.slice(0, 200)}${extractedCode.length > 200 ? '…' : ''}`}
+                  </pre>
+                </div>
+              )}
             </div>
           )}
-        </div>
-      </div>
-    );
-  }
 
-  return (
-    <div className="space-y-4 w-full">
-      {/* 实时预览区 */}
-      <div className="card bg-base-100 shadow-2xl border-2 border-primary">
-        <div className="card-body p-0">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 bg-primary/10">
-            <div className="flex items-center gap-2">
-              <div className="badge badge-primary gap-1">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                实时预览
-              </div>
-              <span className="text-sm font-bold">生成的组件</span>
+          {transformResult.error && (
+            <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-600">
+              <p className="mb-2 font-medium">代码转换失败</p>
+              <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{transformResult.error}</pre>
             </div>
-            <div className="join">
-              <button
-                onClick={() => setShowCode(!showCode)}
-                className="btn btn-sm btn-ghost join-item tooltip"
-                data-tip={showCode ? '隐藏代码' : '查看代码'}
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                </svg>
-              </button>
-              <button
-                onClick={handleCopy}
-                className={`btn btn-sm join-item ${copied ? 'btn-success' : 'btn-primary'}`}
-              >
-                {copied ? (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span className="ml-1">已复制</span>
-                  </>
-                ) : (
-                  <>
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                    <span className="ml-1">复制</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
+          )}
 
-          {/* Live Preview */}
-          <div className="p-6 min-h-[200px] bg-gradient-to-br from-base-200/50 to-base-100">
+          {!waitingForFirstRender && runtimeCodeToRender && (
             <LiveProvider
-              code={processedCode}
+              code={runtimeCodeToRender}
               noInline={true}
               scope={{
                 useState,
                 useEffect,
                 useMemo,
                 useRef,
-                React: { useState, useEffect, useMemo, useRef }
+                React,
               }}
             >
-              <div className="rounded-lg">
+              <div className="rounded-2xl border border-neutral-200 bg-white px-4 py-5 shadow-inner">
                 <LivePreview />
               </div>
-              <LiveError
-                className="alert alert-error mt-4 text-xs font-mono"
-                style={{ whiteSpace: 'pre-wrap' }}
-              />
+              <PreviewError onChange={setLiveError} />
             </LiveProvider>
-          </div>
+          )}
 
-          {/* Code Display */}
-          {showCode && (
-            <div className="p-4 bg-base-200 border-t border-base-300">
-              <div className="mockup-code">
-                <pre data-prefix=">" className="text-warning"><code>components/GeneratedComponent.tsx</code></pre>
-                <pre data-prefix="$" className="text-success"><code>cat GeneratedComponent.tsx</code></pre>
-                <pre data-prefix="" className="bg-warning/10"><code className="text-xs">{extractedCode}</code></pre>
-              </div>
+          {!waitingForFirstRender && !previewCode && (
+            <div className="rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 px-4 py-6 text-sm text-neutral-500">
+              等待生成可渲染的代码…
             </div>
           )}
         </div>
-      </div>
 
-      {/* 统计信息 */}
-      <div className="stats stats-horizontal shadow-lg w-full bg-base-100">
-        <div className="stat place-items-center">
-          <div className="stat-title">状态</div>
-          <div className="stat-value text-primary text-2xl">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="stat-desc text-success">渲染成功</div>
-        </div>
-
-        <div className="stat place-items-center">
-          <div className="stat-title">代码行数</div>
-          <div className="stat-value text-secondary">{extractedCode.split('\n').length}</div>
-          <div className="stat-desc">lines</div>
-        </div>
-
-        <div className="stat place-items-center">
-          <div className="stat-title">技术栈</div>
-          <div className="stat-value text-accent text-xl">
-            <div className="flex gap-1 items-center">
-              <span>⚛️</span>
-              <span>🎨</span>
+        {showCode && (
+          <div className="border-t border-neutral-200 bg-neutral-50 px-6 py-5">
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4">
+              <p className="text-xs font-medium uppercase tracking-[0.3em] text-neutral-400">Generated Code</p>
+              <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap break-words text-[12px] leading-relaxed text-neutral-700">
+                {extractedCode}
+              </pre>
             </div>
           </div>
-          <div className="stat-desc">React + daisyUI</div>
-        </div>
+        )}
       </div>
 
-      {/* 使用说明 */}
-      <div className="collapse collapse-arrow bg-base-100 border border-base-300 shadow-lg">
-        <input type="checkbox" />
-        <div className="collapse-title font-medium flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span>如何在项目中使用</span>
-          <div className="badge badge-info badge-sm">指南</div>
-        </div>
-        <div className="collapse-content">
-          <div className="alert alert-info mb-4">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-            </svg>
-            <div className="text-sm">
-              <div className="font-bold">上方是实时预览</div>
-              <div>您看到的组件已经在浏览器中实时渲染。点击&quot;查看代码&quot;可以查看源码并复制到您的项目中。</div>
-            </div>
-          </div>
-
-          <ul className="steps steps-vertical w-full">
-            <li className="step step-primary">
-              <div className="text-left ml-4">
-                <div className="font-bold">查看预览</div>
-                <p className="text-sm opacity-70">上方显示的是组件的实时渲染效果</p>
-              </div>
-            </li>
-            <li className="step step-primary">
-              <div className="text-left ml-4">
-                <div className="font-bold">复制代码</div>
-                <p className="text-sm opacity-70">点击 <kbd className="kbd kbd-xs">复制</kbd> 按钮获取完整代码</p>
-              </div>
-            </li>
-            <li className="step step-primary">
-              <div className="text-left ml-4">
-                <div className="font-bold">集成到项目</div>
-                <p className="text-sm opacity-70">在项目中创建 <code className="text-xs bg-base-200 px-1 rounded">components/YourComponent.tsx</code></p>
-              </div>
-            </li>
-            <li className="step step-primary">
-              <div className="text-left ml-4">
-                <div className="font-bold">开始使用</div>
-                <p className="text-sm opacity-70">导入并在页面中使用组件</p>
-              </div>
-            </li>
-          </ul>
-
-          <div className="divider">前置要求</div>
-          <div className="flex flex-wrap gap-2">
-            <kbd className="kbd">React 18+</kbd>
-            <kbd className="kbd">TypeScript</kbd>
-            <kbd className="kbd">Tailwind CSS</kbd>
-            <kbd className="kbd">daisyUI</kbd>
-          </div>
-        </div>
+      <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+        <span className="rounded-full bg-white px-3 py-1 shadow-sm">行数：{extractedCode.split('\n').length}</span>
+        {activeError ? (
+          <span className="rounded-full bg-red-50 px-3 py-1 text-red-500">请检查代码语法或缺失的依赖</span>
+        ) : (
+          <span className="rounded-full bg-white px-3 py-1 shadow-sm">支持 React · Tailwind CSS</span>
+        )}
+        {(extractedCode.includes('placeholder') || extractedCode.includes('example') || extractedCode.includes('示例')) && (
+          <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-600">包含示例数据，记得替换为真实内容</span>
+        )}
       </div>
-
-      {/* 提示信息 */}
-      {(extractedCode.includes('placeholder') || extractedCode.includes('example') || extractedCode.includes('示例')) && (
-        <div className="alert alert-warning shadow-lg">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            className="stroke-current shrink-0 h-6 w-6"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-            />
-          </svg>
-          <div>
-            <h3 className="font-bold">包含示例数据</h3>
-            <div className="text-xs">该组件使用了示例/占位数据。在实际项目中，请替换为真实数据或接入 API。</div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
