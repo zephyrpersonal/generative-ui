@@ -149,7 +149,18 @@ export default function DynamicUIRenderer({ code, isStreaming = false }: Dynamic
     try {
       const result = Babel.transform(previewCode, {
         presets: ['env', 'react'],
-        plugins: ['transform-typescript', 'proposal-class-properties', 'proposal-object-rest-spread'],
+        plugins: [
+          [
+            'transform-typescript',
+            {
+              isTSX: true,
+              allowDeclareFields: true,
+              allowNamespaces: true,
+            },
+          ],
+          'proposal-class-properties',
+          'proposal-object-rest-spread',
+        ],
         filename: 'GeneratedComponent.tsx',
       });
 
