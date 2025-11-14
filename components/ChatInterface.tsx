@@ -8,33 +8,35 @@ interface Message {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  createdAt: string;
   isStreaming?: boolean;
+  isError?: boolean;
 }
 
 const examplePrompts = [
   {
-    icon: '👤',
-    label: '用户卡片',
+    icon: '🧾',
+    title: '信息卡片',
+    description: '生成一个展示头像、姓名、职位与社交链接的用户资料卡',
     prompt: '创建一个用户资料卡片，包含头像、姓名、职位和社交媒体链接',
-    color: 'btn-info'
   },
   {
-    icon: '🛍️',
-    label: '产品卡片',
+    icon: '🛒',
+    title: '产品展示',
+    description: '展示图片、价格、评分与操作按钮的产品卡片',
     prompt: '创建一个产品展示卡片，带有图片、价格、评分和购买按钮',
-    color: 'btn-success'
   },
   {
     icon: '✅',
-    label: '待办列表',
+    title: '待办列表',
+    description: '带有添加、完成和删除交互的待办事项列表',
     prompt: '创建一个待办事项列表，可以添加、完成和删除任务',
-    color: 'btn-warning'
   },
   {
     icon: '📊',
-    label: '统计面板',
+    title: '数据仪表盘',
+    description: '包含多张指标卡片和趋势图的轻量看板',
     prompt: '创建一个数据统计面板，显示多个指标卡片',
-    color: 'btn-secondary'
   },
 ];
 
@@ -42,7 +44,11 @@ export default function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const hasConversation = messages.length > 0;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,19 +58,22 @@ export default function ChatInterface() {
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading) return;
+  const submitMessage = async () => {
+    const prompt = input.trim();
+    if (!prompt || isLoading) return;
 
+    const createdAt = new Date().toISOString();
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: `${Date.now()}-user`,
       role: 'user',
-      content: input,
+      content: prompt,
+      createdAt,
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
+    setError(null);
 
     try {
       const response = await fetch('/api/generate', {
@@ -72,68 +81,72 @@ export default function ChatInterface() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt: input }),
+        body: JSON.stringify({ prompt }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to generate UI');
+      if (!response.ok || !response.body) {
+        throw new Error('生成失败，请检查服务是否可用');
       }
 
-      const reader = response.body?.getReader();
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
-
-      if (!reader) {
-        throw new Error('No reader available');
-      }
-
-      // 创建助手消息用于流式更新
-      const assistantMessageId = (Date.now() + 1).toString();
+      const assistantMessageId = `${Date.now()}-assistant`;
       let fullContent = '';
 
-      setMessages(prev => [
+      setMessages((prev) => [
         ...prev,
         {
           id: assistantMessageId,
           role: 'assistant',
           content: '',
+          createdAt: new Date().toISOString(),
           isStreaming: true,
         },
       ]);
 
-      // 读取流式数据
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const chunk = decoder.decode(value);
+        const chunk = decoder.decode(value, { stream: true });
         fullContent += chunk;
 
-        // 更新消息内容
-        setMessages(prev =>
-          prev.map(msg =>
+        setMessages((prev) =>
+          prev.map((msg) =>
             msg.id === assistantMessageId
-              ? { ...msg, content: fullContent }
+              ? {
+                  ...msg,
+                  content: fullContent,
+                  isStreaming: true,
+                }
               : msg
           )
         );
       }
 
-      // 完成流式传输
-      setMessages(prev =>
-        prev.map(msg =>
+      setMessages((prev) =>
+        prev.map((msg) =>
           msg.id === assistantMessageId
-            ? { ...msg, isStreaming: false }
+            ? {
+                ...msg,
+                content: fullContent,
+                isStreaming: false,
+              }
             : msg
         )
       );
-    } catch (error) {
-      console.error('Error:', error);
-      setMessages(prev => [
+    } catch (err) {
+      console.error('Error:', err);
+      const message = err instanceof Error ? err.message : '生成 UI 时出现未知错误。';
+      setError(message);
+      setMessages((prev) => [
         ...prev,
         {
-          id: Date.now().toString(),
+          id: `${Date.now()}-assistant-error`,
           role: 'assistant',
-          content: '抱歉，生成 UI 时出现错误。请检查您的 API 密钥配置或稍后重试。',
+          content: '抱歉，生成 UI 时出现问题，请稍后重试或检查后端服务配置。',
+          createdAt: new Date().toISOString(),
+          isError: true,
         },
       ]);
     } finally {
@@ -141,246 +154,193 @@ export default function ChatInterface() {
     }
   };
 
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await submitMessage();
+  };
+
+  const handleKeyDown = async (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      await submitMessage();
+    }
+  };
+
   return (
-    <div className="flex flex-col h-screen bg-gradient-to-br from-base-200 via-base-100 to-base-200">
-      {/* Header - 使用 daisyUI navbar */}
-      <header className="navbar bg-base-100 shadow-xl border-b border-base-300">
-        <div className="navbar-start">
-          <a className="btn btn-ghost normal-case text-xl gap-2">
-            <span className="text-2xl">✨</span>
-            <span className="font-bold">Generative UI</span>
-          </a>
-        </div>
-
-        <div className="navbar-center hidden lg:flex">
-          <div className="flex gap-2">
-            <div className="badge badge-primary gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              AI 驱动
+    <div className="flex h-screen flex-col bg-[#f7f8fb] text-neutral-900">
+      <header className="border-b border-neutral-200 bg-white/80 backdrop-blur">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-6 px-6 py-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-neutral-900 text-lg font-semibold text-white">
+              UI
             </div>
-            <div className="badge badge-secondary gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              流式生成
-            </div>
-            <div className="badge badge-accent gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-              </svg>
-              TypeScript
+            <div>
+              <p className="text-sm font-semibold text-neutral-900">Generative UI Studio</p>
+              <p className="text-xs text-neutral-500">将自然语言转化为可运行的界面原型</p>
             </div>
           </div>
-        </div>
-
-        <div className="navbar-end gap-2">
-          <div className="indicator">
-            <span className="indicator-item badge badge-success badge-xs"></span>
-            <button className="btn btn-ghost btn-sm gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              <span className="hidden sm:inline">在线</span>
-            </button>
+          <div className="flex items-center gap-4">
+            <div className="hidden text-xs text-neutral-500 md:block">
+              <p>支持流式渲染 · React · Tailwind CSS</p>
+            </div>
+            <ThemeSwitcher />
           </div>
-          <ThemeSwitcher />
         </div>
       </header>
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="max-w-5xl mx-auto space-y-6">
-          {messages.length === 0 && (
-            <div className="hero min-h-[calc(100vh-20rem)]">
-              <div className="hero-content flex-col lg:flex-row-reverse">
-                <div className="text-center lg:text-left max-w-2xl">
-                  <div className="flex justify-center lg:justify-start mb-6">
-                    <div className="avatar placeholder">
-                      <div className="bg-primary text-primary-content rounded-full w-24">
-                        <span className="text-5xl">🎨</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <h1 className="text-5xl font-bold">
-                    欢迎使用 <span className="text-primary">Generative UI</span>
-                  </h1>
-                  <p className="py-6 text-lg">
-                    使用 AI 的力量，将您的想法转化为精美的 React 组件。
-                    支持 TypeScript、Tailwind CSS 和 daisyUI。
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-10 px-6 py-8">
+          {!hasConversation && (
+            <section className="mt-10 rounded-3xl border border-dashed border-neutral-200 bg-white/70 p-10 text-center shadow-sm">
+              <div className="mx-auto flex max-w-2xl flex-col items-center gap-6">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-neutral-900 text-3xl text-white">
+                  ✨
+                </div>
+                <div className="space-y-3">
+                  <h1 className="text-2xl font-semibold text-neutral-900">欢迎来到生成式界面工作台</h1>
+                  <p className="text-sm leading-relaxed text-neutral-500">
+                    描述你想要的组件，AI 将实时输出可直接使用的 React + Tailwind 代码，并在页面中即时渲染。
                   </p>
-
-                  <div className="alert shadow-lg mb-6">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-info shrink-0 w-6 h-6">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
-                    <div>
-                      <h3 className="font-bold">开始体验</h3>
-                      <div className="text-xs">选择下方的示例，或直接描述您想要的组件</div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {examplePrompts.map((example, index) => (
-                      <div key={index} className="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow cursor-pointer" onClick={() => setInput(example.prompt)}>
-                        <div className="card-body p-4">
-                          <div className="flex items-center gap-3">
-                            <div className={`avatar placeholder`}>
-                              <div className={`${example.color.replace('btn-', 'bg-')} text-base-100 rounded-lg w-12`}>
-                                <span className="text-2xl">{example.icon}</span>
-                              </div>
-                            </div>
-                            <div className="flex-1">
-                              <h2 className="card-title text-base">{example.label}</h2>
-                              <p className="text-xs text-base-content/60 line-clamp-2">{example.prompt}</p>
-                            </div>
-                          </div>
-                        </div>
+                </div>
+                <div className="grid w-full gap-4 sm:grid-cols-2">
+                  {examplePrompts.map((example) => (
+                    <button
+                      key={example.prompt}
+                      type="button"
+                      onClick={() => {
+                        setInput(example.prompt);
+                        inputRef.current?.focus();
+                      }}
+                      className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white px-5 py-4 text-left transition-transform duration-200 hover:-translate-y-1 hover:border-neutral-900 hover:shadow-md"
+                    >
+                      <span className="text-2xl">{example.icon}</span>
+                      <div>
+                        <p className="text-sm font-medium text-neutral-900">{example.title}</p>
+                        <p className="mt-1 text-xs leading-relaxed text-neutral-500">{example.description}</p>
                       </div>
-                    ))}
-                  </div>
-
-                  <div className="divider my-8">功能特性</div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <div className="stat bg-base-100 rounded-box shadow">
-                      <div className="stat-figure text-primary">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                        </svg>
-                      </div>
-                      <div className="stat-title text-xs">实时</div>
-                      <div className="stat-value text-primary text-2xl">流式</div>
-                    </div>
-
-                    <div className="stat bg-base-100 rounded-box shadow">
-                      <div className="stat-figure text-secondary">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                        </svg>
-                      </div>
-                      <div className="stat-title text-xs">语言</div>
-                      <div className="stat-value text-secondary text-2xl">TS</div>
-                    </div>
-
-                    <div className="stat bg-base-100 rounded-box shadow">
-                      <div className="stat-figure text-accent">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" />
-                        </svg>
-                      </div>
-                      <div className="stat-title text-xs">样式</div>
-                      <div className="stat-value text-accent text-xl">daisy</div>
-                    </div>
-                  </div>
+                      <span className="text-xs text-neutral-400">{example.prompt}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
-            </div>
+            </section>
           )}
 
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`chat ${
-                message.role === 'user' ? 'chat-end' : 'chat-start'
-              }`}
-            >
-              <div className="chat-image avatar">
-                <div className="w-10 rounded-full">
-                  <div className={`w-full h-full flex items-center justify-center ${
-                    message.role === 'user' ? 'bg-primary' : 'bg-secondary'
-                  } text-base-100`}>
-                    <span className="text-lg">{message.role === 'user' ? '👤' : '🤖'}</span>
+          {messages.map((message) => {
+            const timestamp = new Date(message.createdAt).toLocaleTimeString('zh-CN', {
+              hour: '2-digit',
+              minute: '2-digit',
+            });
+
+            return (
+              <div
+                key={message.id}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div className="flex max-w-[80%] flex-col gap-3">
+                  <div className="flex items-center gap-2 text-xs text-neutral-400">
+                    <span className="font-medium text-neutral-600">
+                      {message.role === 'user' ? '你' : '界面助手'}
+                    </span>
+                    <span>·</span>
+                    <span>{timestamp}</span>
                   </div>
+
+                  {message.role === 'user' ? (
+                    <div className="rounded-3xl bg-neutral-900 px-5 py-4 text-sm leading-relaxed text-white shadow-sm">
+                      {message.content}
+                    </div>
+                  ) : message.isError ? (
+                    <div className="rounded-3xl border border-red-200 bg-red-50 px-5 py-4 text-sm leading-relaxed text-red-600">
+                      {message.content}
+                    </div>
+                  ) : (
+                    <DynamicUIRenderer code={message.content} isStreaming={Boolean(message.isStreaming)} />
+                  )}
+
+                  {message.isStreaming && !message.isError && (
+                    <span className="text-xs text-blue-500">AI 正在生成界面…</span>
+                  )}
                 </div>
               </div>
-              <div className="chat-header">
-                {message.role === 'user' ? '你' : 'AI 助手'}
-                <time className="text-xs opacity-50 ml-1">
-                  {new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                </time>
-              </div>
-              <div
-                className={`chat-bubble ${
-                  message.role === 'user'
-                    ? 'chat-bubble-primary'
-                    : 'chat-bubble-secondary'
-                }`}
-              >
-                {message.role === 'user' ? (
-                  message.content
-                ) : (
-                  <DynamicUIRenderer code={message.content} />
-                )}
-              </div>
-              <div className="chat-footer opacity-50">
-                {message.isStreaming ? (
-                  <span className="loading loading-dots loading-xs"></span>
-                ) : message.role === 'assistant' ? (
-                  <span className="flex items-center gap-1">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    已完成
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
-      </div>
+      </main>
 
-      {/* Input Area - 使用 daisyUI form-control */}
-      <footer className="border-t border-base-300 bg-base-100 shadow-xl">
-        <div className="max-w-5xl mx-auto p-4">
-          <form onSubmit={handleSubmit} className="form-control">
-            <label className="label">
-              <span className="label-text font-semibold flex items-center gap-1">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+      <footer className="border-t border-neutral-200 bg-white/80 backdrop-blur">
+        <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-5xl flex-col gap-3 px-6 py-5">
+          <div className="flex items-center justify-between text-xs text-neutral-400">
+            <span>按 Enter 发送 · Shift + Enter 换行</span>
+            <span>{input.length > 0 ? `${input.length} 字符` : '提示词越具体效果越好'}</span>
+          </div>
+          <div className="flex items-end gap-3 rounded-3xl border border-neutral-200 bg-white px-4 py-3 shadow-sm focus-within:border-neutral-900">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="例如：生成一个简洁的登录表单，包含社交登录按钮"
+              rows={2}
+              className="min-h-[60px] flex-1 resize-none border-none bg-transparent text-sm leading-relaxed text-neutral-900 outline-none placeholder:text-neutral-400"
+              disabled={isLoading}
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className={`flex h-11 w-11 items-center justify-center rounded-full text-sm font-medium transition-colors ${
+                isLoading || !input.trim()
+                  ? 'bg-neutral-200 text-neutral-400'
+                  : 'bg-neutral-900 text-white hover:bg-neutral-700'
+              }`}
+            >
+              {isLoading ? (
+                <svg
+                  className="h-4 w-4 animate-spin"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  ></circle>
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                  ></path>
                 </svg>
-                描述您的组件想法
-              </span>
-              {input.length > 0 && (
-                <span className="label-text-alt badge badge-ghost">{input.length} 字符</span>
+              ) : (
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M5 12L19 5L12 19L10.5 13.5L5 12Z"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               )}
-            </label>
-            <div className="input-group">
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="例如：创建一个炫酷的登录表单..."
-                className="input input-bordered input-lg w-full focus:input-primary"
-                disabled={isLoading}
-              />
-              <button
-                type="submit"
-                className={`btn btn-primary btn-lg ${isLoading ? 'loading' : ''}`}
-                disabled={isLoading || !input.trim()}
-              >
-                {!isLoading && (
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-                )}
-                <span className="hidden sm:inline">{isLoading ? '生成中...' : '发送'}</span>
-              </button>
+            </button>
+          </div>
+          {error && (
+            <div className="flex items-center gap-2 text-xs text-red-500">
+              <span className="h-2 w-2 rounded-full bg-red-400"></span>
+              <span>{error}</span>
             </div>
-            {isLoading && (
-              <progress className="progress progress-primary w-full mt-2"></progress>
-            )}
-            <label className="label">
-              <span className="label-text-alt">
-                <kbd className="kbd kbd-xs">Enter</kbd> 发送
-              </span>
-              <span className="label-text-alt">支持 Markdown 和代码块</span>
-            </label>
-          </form>
-        </div>
+          )}
+        </form>
       </footer>
     </div>
   );
