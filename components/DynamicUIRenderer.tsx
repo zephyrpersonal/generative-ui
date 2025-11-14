@@ -95,7 +95,9 @@ export default function DynamicUIRenderer({ code, isStreaming = false }: Dynamic
     }
 
     if (!componentName) {
-      const constMatch = processed.match(/const\s+([A-Z]\w*)\s*=\s*(?:\([^)]*\)\s*=>|function)/);
+      const constMatch = processed.match(
+        /const\s+([A-Z]\w*)\s*(?::[^=\n]+)?=\s*(?:\([^)]*\)\s*=>|function\b)/,
+      );
       if (constMatch) {
         componentName = constMatch[1];
       }
