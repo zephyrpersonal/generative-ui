@@ -63,59 +63,61 @@ export default function DynamicUIRenderer({ code }: DynamicUIRendererProps) {
   }
 
   return (
-    <div className="space-y-3 w-full">
-      {/* 代码展示区 */}
-      <div className="card bg-gradient-to-br from-base-100 to-base-200 shadow-2xl border-2 border-success/20">
+    <div className="space-y-4 w-full">
+      {/* 代码展示区 - 使用 daisyUI card */}
+      <div className="card bg-base-100 shadow-xl border border-success">
         <div className="card-body p-0">
-          <div className="flex items-center justify-between bg-gradient-to-r from-success/10 to-accent/10 px-4 py-3 border-b border-base-300">
-            <div className="flex items-center gap-3">
-              <div className="avatar placeholder">
-                <div className="bg-success text-success-content rounded-full w-8">
-                  <span className="text-sm">✓</span>
-                </div>
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 bg-success/10">
+            <div className="flex items-center gap-2">
+              <div className="badge badge-success gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                完成
               </div>
-              <div>
-                <h3 className="text-sm font-bold">生成的组件代码</h3>
-                <p className="text-xs text-base-content/60">TypeScript + React + daisyUI</p>
-              </div>
+              <span className="text-sm font-bold">生成的组件代码</span>
             </div>
-            <div className="flex gap-2">
+            <div className="join">
               <button
                 onClick={() => setShowCode(!showCode)}
-                className="btn btn-sm btn-ghost gap-2"
+                className="btn btn-sm btn-ghost join-item tooltip"
+                data-tip={showCode ? '隐藏代码' : '查看代码'}
               >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                 </svg>
-                {showCode ? '隐藏' : '查看'}
               </button>
               <button
                 onClick={handleCopy}
-                className={`btn btn-sm ${copied ? 'btn-success' : 'btn-primary'} gap-2`}
+                className={`btn btn-sm join-item ${copied ? 'btn-success' : 'btn-primary'}`}
               >
                 {copied ? (
                   <>
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    已复制
+                    <span className="ml-1">已复制</span>
                   </>
                 ) : (
                   <>
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                     </svg>
-                    复制
+                    <span className="ml-1">复制代码</span>
                   </>
                 )}
               </button>
             </div>
           </div>
 
+          {/* Code Display */}
           {showCode && (
-            <div className="p-4">
-              <div className="mockup-code bg-neutral text-neutral-content max-h-96 overflow-auto">
-                <pre data-prefix="$"><code className="text-xs">{extractedCode}</code></pre>
+            <div className="p-4 bg-base-200">
+              <div className="mockup-code">
+                <pre data-prefix=">" className="text-warning"><code>generative-ui/components/GeneratedComponent.tsx</code></pre>
+                <pre data-prefix="$" className="text-success"><code>cat GeneratedComponent.tsx</code></pre>
+                <pre data-prefix="" className="bg-warning/10"><code className="text-xs">{extractedCode}</code></pre>
               </div>
             </div>
           )}
@@ -158,50 +160,60 @@ export default function DynamicUIRenderer({ code }: DynamicUIRendererProps) {
         </div>
       </div>
 
-      {/* 使用说明 */}
-      <div className="collapse collapse-plus bg-info/10 border-2 border-info/30 shadow-lg">
+      {/* 使用说明 - 使用 daisyUI collapse */}
+      <div className="collapse collapse-arrow bg-base-100 border border-base-300 shadow-lg">
         <input type="checkbox" />
-        <div className="collapse-title font-bold flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-info" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="collapse-title font-medium flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
           </svg>
-          如何使用此组件
+          <span>如何使用此组件</span>
+          <div className="badge badge-info badge-sm">指南</div>
         </div>
         <div className="collapse-content">
-          <div className="steps steps-vertical lg:steps-horizontal mt-4">
-            <div className="step step-primary">复制代码</div>
-            <div className="step step-primary">创建文件</div>
-            <div className="step step-primary">粘贴代码</div>
-            <div className="step step-primary">导入使用</div>
+          {/* Steps */}
+          <ul className="steps steps-vertical w-full mt-4">
+            <li className="step step-primary">
+              <div className="text-left ml-4">
+                <div className="font-bold">复制代码</div>
+                <p className="text-sm opacity-70">点击上方 <kbd className="kbd kbd-xs">复制代码</kbd> 按钮</p>
+              </div>
+            </li>
+            <li className="step step-primary">
+              <div className="text-left ml-4">
+                <div className="font-bold">创建文件</div>
+                <p className="text-sm opacity-70">在项目中创建 <code className="text-xs bg-base-200 px-1 rounded">components/GeneratedComponent.tsx</code></p>
+              </div>
+            </li>
+            <li className="step step-primary">
+              <div className="text-left ml-4">
+                <div className="font-bold">粘贴代码</div>
+                <p className="text-sm opacity-70">将代码粘贴到新文件</p>
+              </div>
+            </li>
+            <li className="step step-primary">
+              <div className="text-left ml-4">
+                <div className="font-bold">导入使用</div>
+                <div className="mockup-code mt-2 text-xs">
+                  <pre data-prefix="import"><code>GeneratedComponent from &apos;@/components/GeneratedComponent&apos;</code></pre>
+                </div>
+              </div>
+            </li>
+          </ul>
+
+          <div className="alert alert-info mt-4">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" className="stroke-current shrink-0 w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <div className="text-sm">
+              <div className="font-bold">前置要求</div>
+              <div className="flex gap-2 mt-1">
+                <kbd className="kbd kbd-sm">daisyUI</kbd>
+                <kbd className="kbd kbd-sm">Tailwind CSS</kbd>
+                <kbd className="kbd kbd-sm">TypeScript</kbd>
+              </div>
+            </div>
           </div>
-          <ol className="list-decimal list-inside space-y-2 mt-4 text-sm">
-            <li className="flex items-start gap-2">
-              <span>1.</span>
-              <span>点击上方的 <kbd className="kbd kbd-sm">复制</kbd> 按钮复制生成的组件代码</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span>2.</span>
-              <span>在您的 Next.js 项目中创建新文件，例如：
-                <code className="ml-2 px-2 py-1 bg-base-200 rounded text-xs">components/GeneratedComponent.tsx</code>
-              </span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span>3.</span>
-              <span>将复制的代码粘贴到新文件中</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span>4.</span>
-              <span>在需要的地方导入并使用：
-                <code className="ml-2 px-2 py-1 bg-base-200 rounded text-xs block mt-1">
-                  import GeneratedComponent from &apos;@/components/GeneratedComponent&apos;
-                </code>
-              </span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span>5.</span>
-              <span>确保您的项目已安装 <kbd className="kbd kbd-sm">daisyUI</kbd> 和 <kbd className="kbd kbd-sm">Tailwind CSS</kbd></span>
-            </li>
-          </ol>
         </div>
       </div>
 
