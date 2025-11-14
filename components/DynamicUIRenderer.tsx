@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { LiveProvider, LivePreview, LiveError } from 'react-live';
 
 interface DynamicUIRendererProps {
@@ -24,10 +24,13 @@ export default function DynamicUIRenderer({ code }: DynamicUIRendererProps) {
 
   // 处理代码，移除 export default 和 import 语句，提取组件函数
   const processedCode = useMemo(() => {
+    if (!extractedCode) return '';
+
     let processed = extractedCode;
 
-    // 移除所有 import 语句
-    processed = processed.replace(/import\s+.*?from\s+['"].*?['"]\s*;?\s*/g, '');
+    // 移除所有 import 语句（支持多行）
+    processed = processed.replace(/import\s+[\s\S]*?from\s+['"].*?['"]\s*;?\s*/g, '');
+    processed = processed.replace(/import\s+['"].*?['"]\s*;?\s*/g, '');
 
     // 移除 'use client' 指令
     processed = processed.replace(/['"]use client['"];?\s*/g, '');
@@ -35,20 +38,50 @@ export default function DynamicUIRenderer({ code }: DynamicUIRendererProps) {
     // 移除 export default
     processed = processed.replace(/export\s+default\s+/g, '');
 
-    // 如果是函数声明，转换为立即执行
-    // 例如: function MyComponent() { ... } => (() => { function MyComponent() { ... }; return <MyComponent />; })()
-    const functionMatch = processed.match(/function\s+(\w+)\s*\([^)]*\)\s*\{/);
-    if (functionMatch) {
-      const componentName = functionMatch[1];
-      // 将整个函数包装，并在最后返回组件实例
-      processed = `(() => { ${processed}; return <${componentName} />; })()`;
+    // 移除 export
+    processed = processed.replace(/export\s+/g, '');
+
+    // 清理首尾空白
+    processed = processed.trim();
+
+    // 如果代码已经是 JSX 表达式（以 < 开头），直接返回
+    if (processed.startsWith('<')) {
+      return processed;
     }
 
-    // 如果是 const 声明的组件
-    const constMatch = processed.match(/const\s+(\w+)\s*=\s*\([^)]*\)\s*=>/);
-    if (constMatch) {
-      const componentName = constMatch[1];
-      processed = `(() => { ${processed}; return <${componentName} />; })()`;
+    // 检测组件名称 - 改进的正则表达式
+    let componentName = null;
+
+    // 尝试匹配 function 声明: function ComponentName() { ... }
+    let functionMatch = processed.match(/function\s+([A-Z]\w+)\s*\(/);
+    if (functionMatch) {
+      componentName = functionMatch[1];
+    }
+
+    // 尝试匹配 const 声明: const ComponentName = () => { ... } 或 const ComponentName = function
+    if (!componentName) {
+      const constMatch = processed.match(/const\s+([A-Z]\w+)\s*=\s*(?:\([^)]*\)\s*=>|function)/);
+      if (constMatch) {
+        componentName = constMatch[1];
+      }
+    }
+
+    // 如果找到组件名，使用 render() 函数（noInline={true} 模式）
+    if (componentName) {
+      // 检查是否已经有 render() 调用
+      if (!processed.includes('render(')) {
+        // 在代码最后添加 render() 调用
+        processed = `${processed}\n\nrender(<${componentName} />);`;
+      }
+    } else {
+      // 如果没有检测到组件名，可能是直接的 JSX
+      // 检查是否包含 JSX 标签
+      if (processed.includes('<') && processed.includes('>')) {
+        // 直接用 render() 包装 JSX
+        if (!processed.includes('render(')) {
+          processed = `render(${processed});`;
+        }
+      }
     }
 
     return processed;
@@ -151,8 +184,14 @@ export default function DynamicUIRenderer({ code }: DynamicUIRendererProps) {
           <div className="p-6 min-h-[200px] bg-gradient-to-br from-base-200/50 to-base-100">
             <LiveProvider
               code={processedCode}
-              noInline={false}
-              scope={{ useState }}
+              noInline={true}
+              scope={{
+                useState,
+                useEffect,
+                useMemo,
+                useRef,
+                React: { useState, useEffect, useMemo, useRef }
+              }}
             >
               <div className="rounded-lg">
                 <LivePreview />
