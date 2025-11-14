@@ -1,17 +1,28 @@
 # 🎨 Generative UI - AI 驱动的动态 UI 生成器
 
-一个基于 Next.js 的 AI 驱动应用，通过聊天界面输入描述即可生成动态 React 组件代码，支持流式传输。
+**所见即所得的 AI UI 生成器** - 通过自然语言描述，AI 实时生成并渲染 React 组件，立即在浏览器中看到效果！
 
-## ✨ 特性
+## 🌟 核心亮点
 
+**💫 实时组件渲染** - 这是本项目最核心的创新功能：
+- AI 生成的组件**直接在页面上实时渲染**，不是只显示代码
+- 所见即所得 - 立即看到组件的实际效果和交互
+- 支持流式渲染 - 代码生成过程中实时更新预览
+- 使用 `react-live` 实现动态代码执行
+
+## ✨ 完整特性
+
+- 🎯 **实时预览**: 组件生成后立即渲染，直接查看效果
 - 🤖 **AI 驱动**: 支持 OpenAI、OpenRouter 等多种 LLM 服务
-- 💬 **聊天界面**: 直观的对话式交互体验
-- 🌊 **流式传输**: 实时流式显示 AI 生成的代码
+- 💬 **聊天界面**: 自然语言描述即可生成组件
+- 🌊 **流式生成**: 实时显示 AI 生成过程
 - 🎨 **daisyUI 样式**: 生成的组件使用 daisyUI 和 Tailwind CSS
+- 🎭 **主题切换**: 支持 8 种精美主题实时切换
 - ⚡ **Next.js 15**: 使用最新的 Next.js App Router
-- 📱 **响应式设计**: 适配各种屏幕尺寸
-- 🔄 **TypeScript**: 完整的类型支持
+- 📱 **响应式设计**: 完美适配各种屏幕尺寸
+- 🔄 **TypeScript**: 完整的类型安全
 - ⚙️ **灵活配置**: 支持任何兼容 OpenAI API 的服务
+- 📋 **一键复制**: 轻松复制代码到您的项目
 
 ## 🚀 快速开始
 
@@ -112,9 +123,35 @@ generative-ui/
 
 ## 🎯 核心功能
 
-### 1. 流式 AI 生成
+### 1. 🎬 实时组件渲染 (核心创新)
 
-使用 OpenAI 兼容的流式 API，实时显示生成的代码：
+**这是本项目最重要的功能** - AI 生成的组件直接在浏览器中实时渲染！
+
+```typescript
+import { LiveProvider, LivePreview, LiveError } from 'react-live';
+
+// 动态执行 AI 生成的代码并实时渲染
+<LiveProvider code={generatedCode} scope={{ useState }}>
+  <LivePreview />  {/* 实时渲染组件 */}
+  <LiveError />    {/* 错误提示 */}
+</LiveProvider>
+```
+
+**工作流程：**
+1. 📝 用户输入组件描述（如："创建一个用户卡片"）
+2. 🤖 AI 流式生成 React 组件代码
+3. ✨ 代码自动处理（移除 import/export）
+4. 🎨 **组件立即在页面上渲染**
+5. 👀 用户实时看到组件效果和交互
+6. 📋 满意后一键复制代码到项目
+
+**与传统方式对比：**
+- ❌ 传统：生成代码 → 复制 → 粘贴到项目 → 运行 → 查看效果
+- ✅ 本项目：生成代码 → **立即看到效果** → 满意后复制
+
+### 2. 流式 AI 生成
+
+使用 OpenAI 兼容的流式 API，实时生成代码：
 
 ```typescript
 const response = await openai.chat.completions.create({
@@ -123,7 +160,7 @@ const response = await openai.chat.completions.create({
   messages: [...]
 });
 
-// 创建可读流
+// 创建可读流，实时传输到前端
 const stream = new ReadableStream({
   async start(controller) {
     for await (const chunk of response) {
@@ -137,7 +174,7 @@ const stream = new ReadableStream({
 });
 ```
 
-### 2. 智能提示系统
+### 3. 智能提示系统
 
 AI 被配置为专门生成：
 - TypeScript + React 函数组件
