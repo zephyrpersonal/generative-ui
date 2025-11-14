@@ -1,8 +1,20 @@
 import { OpenAI } from 'openai';
 
-// 创建 OpenAI API 客户端
+// 从环境变量读取配置
+const LLM_API_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || '';
+const LLM_BASE_URL = process.env.LLM_BASE_URL; // 可选，用于 OpenRouter 等服务
+const LLM_MODEL = process.env.LLM_MODEL || 'gpt-4o-mini';
+const LLM_TEMPERATURE = parseFloat(process.env.LLM_TEMPERATURE || '0.7');
+const LLM_MAX_TOKENS = parseInt(process.env.LLM_MAX_TOKENS || '2000', 10);
+const LLM_DEFAULT_HEADERS = process.env.LLM_DEFAULT_HEADERS
+  ? JSON.parse(process.env.LLM_DEFAULT_HEADERS)
+  : undefined;
+
+// 创建 OpenAI 兼容的 API 客户端
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || '',
+  apiKey: LLM_API_KEY,
+  baseURL: LLM_BASE_URL,
+  defaultHeaders: LLM_DEFAULT_HEADERS,
 });
 
 // IMPORTANT: 设置运行时为 edge 以支持流式传输
@@ -14,6 +26,16 @@ export async function POST(req: Request) {
 
     if (!prompt) {
       return new Response('Missing prompt', { status: 400 });
+    }
+
+    if (!LLM_API_KEY) {
+      return new Response(
+        JSON.stringify({ error: 'API key not configured' }),
+        {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
     }
 
     // 创建系统提示，指导 AI 生成 React 组件代码
@@ -35,16 +57,16 @@ export async function POST(req: Request) {
 
 只输出代码块，不要有其他解释文字。`;
 
-    // 调用 OpenAI API
+    // 调用 OpenAI 兼容的 API
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: LLM_MODEL,
       stream: true,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.7,
-      max_tokens: 2000,
+      temperature: LLM_TEMPERATURE,
+      max_tokens: LLM_MAX_TOKENS,
     });
 
     // 创建可读流

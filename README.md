@@ -4,13 +4,14 @@
 
 ## ✨ 特性
 
-- 🤖 **AI 驱动**: 使用 OpenAI GPT-4 模型生成 React 组件代码
+- 🤖 **AI 驱动**: 支持 OpenAI、OpenRouter 等多种 LLM 服务
 - 💬 **聊天界面**: 直观的对话式交互体验
 - 🌊 **流式传输**: 实时流式显示 AI 生成的代码
 - 🎨 **daisyUI 样式**: 生成的组件使用 daisyUI 和 Tailwind CSS
 - ⚡ **Next.js 15**: 使用最新的 Next.js App Router
 - 📱 **响应式设计**: 适配各种屏幕尺寸
 - 🔄 **TypeScript**: 完整的类型支持
+- ⚙️ **灵活配置**: 支持任何兼容 OpenAI API 的服务
 
 ## 🚀 快速开始
 
@@ -18,7 +19,7 @@
 
 - Node.js 18+
 - npm 或 yarn
-- OpenAI API Key
+- 任意兼容 OpenAI API 的服务密钥（OpenAI、OpenRouter 等）
 
 ### 安装步骤
 
@@ -40,12 +41,19 @@
    cp .env.example .env.local
    ```
 
-   编辑 `.env.local` 并添加您的 OpenAI API Key:
+   编辑 `.env.local` 并配置您的 LLM API。查看下方 [LLM API 配置](#-llm-api-配置) 章节了解详情。
+
+   **最简配置（使用 OpenAI）:**
    ```env
-   OPENAI_API_KEY=your_openai_api_key_here
+   LLM_API_KEY=sk-your-openai-key
    ```
 
-   获取 API Key: https://platform.openai.com/api-keys
+   **使用 OpenRouter:**
+   ```env
+   LLM_API_KEY=sk-or-v1-your-key
+   LLM_BASE_URL=https://openrouter.ai/api/v1
+   LLM_MODEL=anthropic/claude-3.5-sonnet
+   ```
 
 4. **启动开发服务器**
    ```bash
@@ -106,11 +114,27 @@ generative-ui/
 
 ### 1. 流式 AI 生成
 
-使用 OpenAI 的流式 API 和 Vercel AI SDK，实时显示生成的代码：
+使用 OpenAI 兼容的流式 API，实时显示生成的代码：
 
 ```typescript
-const stream = OpenAIStream(response);
-return new StreamingTextResponse(stream);
+const response = await openai.chat.completions.create({
+  model: LLM_MODEL,
+  stream: true,
+  messages: [...]
+});
+
+// 创建可读流
+const stream = new ReadableStream({
+  async start(controller) {
+    for await (const chunk of response) {
+      const content = chunk.choices[0]?.delta?.content || '';
+      if (content) {
+        controller.enqueue(encoder.encode(content));
+      }
+    }
+    controller.close();
+  }
+});
 ```
 
 ### 2. 智能提示系统
@@ -127,6 +151,70 @@ AI 被配置为专门生成：
 
 ## 🔧 配置
 
+### LLM API 配置
+
+本项目支持任何兼容 OpenAI API 格式的 LLM 服务。通过环境变量灵活配置。
+
+> 💡 **详细配置指南**: 查看 [CONFIGURATION.md](./CONFIGURATION.md) 了解各种 LLM 服务的完整配置教程。
+
+#### 环境变量说明
+
+| 变量名 | 必需 | 默认值 | 说明 |
+|--------|------|--------|------|
+| `LLM_API_KEY` | ✅ | - | API 密钥 |
+| `LLM_BASE_URL` | ❌ | `https://api.openai.com/v1` | API 基础 URL |
+| `LLM_MODEL` | ❌ | `gpt-4o-mini` | 模型名称 |
+| `LLM_TEMPERATURE` | ❌ | `0.7` | 温度参数 (0-2) |
+| `LLM_MAX_TOKENS` | ❌ | `2000` | 最大 tokens |
+| `LLM_DEFAULT_HEADERS` | ❌ | - | 自定义请求头（JSON） |
+
+**向后兼容**: 仍支持 `OPENAI_API_KEY` 环境变量。
+
+#### 配置示例
+
+**1. 使用 OpenAI（默认）**
+```env
+LLM_API_KEY=sk-proj-...
+# 其他参数使用默认值即可
+```
+
+**2. 使用 OpenRouter**
+```env
+LLM_API_KEY=sk-or-v1-...
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=anthropic/claude-3.5-sonnet
+LLM_DEFAULT_HEADERS={"HTTP-Referer": "https://your-site.com", "X-Title": "Generative UI"}
+```
+
+**3. 使用 DeepSeek**
+```env
+LLM_API_KEY=sk-...
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_MODEL=deepseek-chat
+```
+
+**4. 使用本地 LLM (如 Ollama)**
+```env
+LLM_API_KEY=ollama
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=llama3.1:8b
+```
+
+**5. 自定义参数**
+```env
+LLM_API_KEY=your-key
+LLM_MODEL=gpt-4o
+LLM_TEMPERATURE=0.8
+LLM_MAX_TOKENS=3000
+```
+
+#### 获取 API Key
+
+- **OpenAI**: https://platform.openai.com/api-keys
+- **OpenRouter**: https://openrouter.ai/keys
+- **DeepSeek**: https://platform.deepseek.com/
+- **其他服务**: 查看对应服务商文档
+
 ### daisyUI 主题
 
 在 `tailwind.config.ts` 中配置主题：
@@ -135,14 +223,6 @@ AI 被配置为专门生成：
 daisyui: {
   themes: ["light", "dark", "cupcake"],
 }
-```
-
-### OpenAI 模型
-
-在 `app/api/generate/route.ts` 中修改模型：
-
-```typescript
-model: 'gpt-4o-mini', // 可改为 'gpt-4' 等
 ```
 
 ## 📝 开发
@@ -162,10 +242,16 @@ npm run lint
 
 ## ⚠️ 注意事项
 
-1. **API 费用**: 使用 OpenAI API 会产生费用，请注意控制使用量
-2. **安全性**: 不要将 `.env.local` 文件提交到版本控制
+1. **API 费用**: 使用 LLM API 会产生费用，请注意控制使用量
+2. **安全性**:
+   - 不要将 `.env.local` 文件提交到版本控制
+   - 生产环境建议使用环境变量管理服务
 3. **代码执行**: 当前版本仅显示生成的代码，不直接执行（出于安全考虑）
-4. **生产环境**: 在生产环境部署前，建议添加速率限制和认证机制
+4. **生产环境**: 在生产环境部署前，建议添加：
+   - 速率限制（防止 API 滥用）
+   - 用户认证机制
+   - 请求日志记录
+5. **模型选择**: 不同模型的能力和费用差异很大，请根据需求选择合适的模型
 
 ## 🤝 贡献
 
