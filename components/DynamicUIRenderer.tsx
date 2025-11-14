@@ -1,8 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { LiveProvider, LivePreview, useLiveContext } from 'react-live';
+import { useState, useEffect, useMemo, useRef, useContext } from 'react';
+import { LiveContext, LiveProvider, LivePreview } from 'react-live';
 
 interface DynamicUIRendererProps {
   code: string;
@@ -10,20 +10,21 @@ interface DynamicUIRendererProps {
 }
 
 function PreviewError({ onChange }: { onChange: (message: string | null) => void }) {
-  const { error } = useLiveContext();
+  const live = useContext(LiveContext);
+  const errorMessage = typeof live?.error === 'string' ? live.error : null;
 
   useEffect(() => {
-    onChange(error ?? null);
-  }, [error, onChange]);
+    onChange(errorMessage);
+  }, [errorMessage, onChange]);
 
-  if (!error) {
+  if (!errorMessage) {
     return null;
   }
 
   return (
     <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-600">
       <p className="mb-2 font-medium">渲染出错</p>
-      <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{error}</pre>
+      <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed">{errorMessage}</pre>
     </div>
   );
 }
